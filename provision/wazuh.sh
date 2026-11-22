@@ -5,26 +5,41 @@ set -euo pipefail
 LOG=/var/log/wazuh-lab-install.log
 SENTINEL=/root/.wazuh-lab-done            # écrit par CE script quand l'install est confirmée terminée
 TAR=/root/wazuh-install-files.tar         # certs + mots de passe (créé tôt par l'installeur, PAS un marqueur de fin)
+ADMIN_PW="Passer123-"                      # mot de passe fixe du dashboard admin.
+# Wazuh impose : 8-64 caractères, au moins une majuscule, une minuscule, un chiffre et un
+# symbole parmi . * + ? -  (donc « passer123 » seul est refusé).
 
-# lab-count '<requête lucene>' [minutes] + affichage du mot de passe admin. Idempotent.
+# lab-count '<requête lucene>' [minutes] + rappel du mot de passe admin. Idempotent.
+# Heredoc NON quoté : $ADMIN_PW est injecté (source unique), les \$ restent littéraux dans le script.
 finalize() {
-  install -m 755 /dev/stdin /usr/local/bin/lab-count <<'SCRIPT'
+  install -m 755 /dev/stdin /usr/local/bin/lab-count <<SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
-q=${1:?requête lucene}; mins=${2:-10}
-pw=$(tar -O -xf /root/wazuh-install-files.tar wazuh-install-files/wazuh-passwords.txt \
-     | awk -F"'" '/indexer_username: .admin./{getline; print $2}')
-body=$(printf '{"query":{"bool":{"must":[{"query_string":{"query":"%s"}},{"range":{"timestamp":{"gte":"now-%dm"}}}]}}}' "$q" "$mins")
-curl -sk -u "admin:$pw" "https://localhost:9200/wazuh-alerts-*/_count" \
-     -H 'Content-Type: application/json' -d "$body" | sed -E 's/.*"count":([0-9]+).*/\1/'
+q=\${1:?requête lucene}; mins=\${2:-10}
+body=\$(printf '{"query":{"bool":{"must":[{"query_string":{"query":"%s"}},{"range":{"timestamp":{"gte":"now-%dm"}}}]}}}' "\$q" "\$mins")
+curl -sk -u 'admin:$ADMIN_PW' "https://localhost:9200/wazuh-alerts-*/_count" \\
+     -H 'Content-Type: application/json' -d "\$body" | sed -E 's/.*"count":([0-9]+).*/\\1/'
 SCRIPT
-  local pw
-  pw=$(tar -O -xf "$TAR" wazuh-install-files/wazuh-passwords.txt \
-       | awk -F"'" '/indexer_username: .admin./{getline; print $2}')
   echo "=================================================="
   echo "Dashboard : https://localhost:8443   (utilisateur admin)"
-  echo "Mot de passe admin : $pw"
+  echo "Mot de passe admin : $ADMIN_PW"
   echo "=================================================="
+}
+
+# Attendre que l'indexer réponde (nécessaire avant de changer un mot de passe).
+wait_indexer() {
+  local _; for _ in $(seq 1 30); do
+    curl -sk -o /dev/null https://localhost:9200 && return 0
+    sleep 2
+  done
+}
+
+# Fixer le mot de passe du dashboard admin à $ADMIN_PW (sinon l'installeur en génère un aléatoire).
+# Idempotent : relancer le remet simplement à la même valeur.
+set_admin_password() {
+  [ -f /root/wazuh-passwords-tool.sh ] \
+    || curl -sS -o /root/wazuh-passwords-tool.sh https://packages.wazuh.com/4.14/wazuh-passwords-tool.sh
+  bash /root/wazuh-passwords-tool.sh -u admin -p "$ADMIN_PW" >/dev/null 2>&1 || true
 }
 
 # Règles locales : hisser les événements Suricata « normaux » (http/dns/tls/flow/ssh) au niveau 3
@@ -67,6 +82,8 @@ if [ -f "$SENTINEL" ]; then
   harden
   local_rules
   systemctl start wazuh-indexer wazuh-dashboard 2>/dev/null || true
+  wait_indexer
+  set_admin_password
   systemctl restart wazuh-manager 2>/dev/null || true
   finalize
   exit 0
@@ -86,7 +103,7 @@ arch=$(dpkg --print-architecture)
 deb="wazuh-indexer_4.14.10-1_${arch}.deb"
 if [ ! -s "/var/cache/apt/archives/$deb" ]; then
   echo "Pré-téléchargement de l'indexer Wazuh ($deb, ~874 Mo)…"
-  curl -fL --retry 6 --retry-delay 5 -C - \
+  curl -fsS --retry 6 --retry-delay 5 -C - \
     -o "/var/cache/apt/archives/$deb" \
     "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-indexer/$deb"
 fi
@@ -96,11 +113,15 @@ fi
 # (le dashboard échoue alors sur « No space left on device »). On coupe VD dès que la conf
 # existe et on empêche le feed de s'accumuler tant que l'installeur tourne. harden() le
 # désactivera définitivement après. S'arrête quand l'installeur se termine.
+# S'arrête sur le même marqueur de fin que la boucle principale (pas de détection par nom de
+# process), avec un plafond absolu de 1200 itérations (~40 min) pour ne jamais tourner sans fin.
 diskguard() {
-  while [ ! -f /var/ossec/etc/ossec.conf ] && pgrep -f 'bash wazuh-install.sh' >/dev/null; do sleep 1; done
-  sed -i '/<vulnerability-detection>/,/<\/vulnerability-detection>/ s|<enabled>yes</enabled>|<enabled>no</enabled>|' \
-    /var/ossec/etc/ossec.conf 2>/dev/null || true
-  while pgrep -f 'bash wazuh-install.sh' >/dev/null; do
+  local i
+  for i in $(seq 1 1200); do
+    grep -qE "Installation finished|ERROR:" "$LOG" 2>/dev/null && break
+    [ -f /var/ossec/etc/ossec.conf ] && \
+      sed -i '/<vulnerability-detection>/,/<\/vulnerability-detection>/ s|<enabled>yes</enabled>|<enabled>no</enabled>|' \
+        /var/ossec/etc/ossec.conf 2>/dev/null || true
     find /var/ossec/queue/vd/feed -mindepth 1 -delete 2>/dev/null || true
     sleep 2
   done
@@ -128,9 +149,12 @@ done
 grep -q "Installation finished" "$LOG" 2>/dev/null \
   || { echo "Install Wazuh non terminée (timeout). Relancer : vagrant provision wazuh"; exit 1; }
 
-# Désactiver VD + libérer le disque AVANT que le feed CVE ne grossisse, puis redémarrer le manager.
+# Désactiver VD + libérer le disque AVANT que le feed CVE ne grossisse, fixer le mot de passe
+# admin, puis redémarrer le manager.
 harden
 local_rules
+wait_indexer
+set_admin_password
 systemctl restart wazuh-manager 2>/dev/null || true
 
 touch "$SENTINEL"

@@ -63,15 +63,14 @@ vagrant destroy -f wazuh && vagrant up wazuh
 ## Accéder au dashboard
 
 Dans le navigateur de ta machine hôte : **https://localhost:8443**
-(accepte le certificat autosigné), utilisateur **`admin`**.
+(accepte le certificat autosigné).
 
-Récupère le mot de passe :
+- Utilisateur : **`admin`**
+- Mot de passe : **`Passer123-`**
 
-```bash
-vagrant ssh wazuh -c "sudo tar -O -xf /root/wazuh-install-files.tar wazuh-install-files/wazuh-passwords.txt" | grep -A1 "username: 'admin'"
-```
-
-(Il s'affiche aussi à la fin de `vagrant up` / `vagrant provision wazuh`.)
+Le mot de passe est fixé par le provisioning (Wazuh exige une majuscule, une minuscule, un
+chiffre et un symbole). Il est aussi rappelé à la fin de `vagrant up` / `vagrant provision wazuh`.
+Pour le changer, modifie `ADMIN_PW` dans `provision/wazuh.sh` puis `vagrant provision wazuh`.
 
 ## Scénarios d'attaque (depuis la machine attaquante)
 
