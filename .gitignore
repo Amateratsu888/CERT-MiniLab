@@ -1,0 +1,7 @@
+# Vagrant / VirtualBox
+.vagrant/
+*.box
+*.log
+
+# OS
+.DS_Store
