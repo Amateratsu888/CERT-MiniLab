@@ -87,6 +87,10 @@ vagrant ssh attacker
 Le brute force (#2) **réussit** : le compte `admin` / `admin123` de pc1 est une **faille
 volontaire** pour la démo. Après plusieurs échecs tu verras une alerte de connexion réussie.
 
+> 📸 **Démonstration pas à pas avec captures d'écran du dashboard :**
+> [`docs/scenario-demo-attaque.md`](docs/scenario-demo-attaque.md) — runbook reproductible
+> (lancer les attaques + les retrouver dans Wazuh, filtre par filtre).
+
 Pour voir le **trafic normal** (pas seulement les alertes), filtre sur
 `agent.name:router and rule.groups:suricata` après avoir navigué depuis un poste
 (`vagrant ssh pc2 -c 'curl -s https://example.com'`).
