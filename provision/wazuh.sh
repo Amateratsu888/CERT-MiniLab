@@ -37,14 +37,25 @@ wait_indexer() {
 # Fixer le mot de passe du dashboard admin à $ADMIN_PW (sinon l'installeur en génère un aléatoire).
 # Idempotent : relancer le remet simplement à la même valeur.
 set_admin_password() {
-  if [ ! -f /root/wazuh-passwords-tool.sh ]; then
-    # -f : échoue sur une erreur HTTP (pas de page d'erreur enregistrée puis exécutée) ;
-    # HTTPS/TLS imposés. Même source officielle que wazuh-install.sh. Blip réseau -> on n'abort pas.
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 \
-      -o /root/wazuh-passwords-tool.sh \
-      https://packages.wazuh.com/4.14/wazuh-passwords-tool.sh || return 0
+  local tool=/root/wazuh-passwords-tool.sh tmp
+  if [ ! -x "$tool" ]; then
+    # Téléchargement atomique : on écrit dans un fichier temporaire et on ne l'installe au
+    # chemin de confiance (root, 700) QUE si curl réussit entièrement — jamais un fichier
+    # partiel exécuté plus tard. -f : échoue sur erreur HTTP ; HTTPS/TLS imposés ; même source
+    # officielle que wazuh-install.sh (pas de pin SHA : l'installeur et les paquets viennent du
+    # même dépôt HTTPS de la même façon).
+    tmp=$(mktemp)
+    if curl -fsSL --proto '=https' --tlsv1.2 --retry 3 \
+         -o "$tmp" https://packages.wazuh.com/4.14/wazuh-passwords-tool.sh; then
+      install -m 700 "$tmp" "$tool"
+    else
+      echo "ATTENTION : téléchargement du password-tool échoué, mot de passe admin inchangé"
+    fi
+    rm -f "$tmp"
+    [ -x "$tool" ] || return 0
   fi
-  bash /root/wazuh-passwords-tool.sh -u admin -p "$ADMIN_PW" >/dev/null 2>&1 || true
+  bash "$tool" -u admin -p "$ADMIN_PW" >/dev/null 2>&1 \
+    || echo "ATTENTION : changement du mot de passe admin échoué (relancer : vagrant provision wazuh)"
 }
 
 # Règles locales : hisser les événements Suricata « normaux » (http/dns/tls/flow/ssh) au niveau 3
