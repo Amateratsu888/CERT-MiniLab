@@ -50,12 +50,15 @@ vagrant up
 ```
 
 Le premier lancement télécharge la box et installe Wazuh : compte **20 à 40 min**. L'installation
-de Wazuh tourne en tâche de fond sur la VM et résiste à une coupure SSH. Si jamais le provisioning
-du serveur s'interrompt, relance-le seul, c'est sans risque (idempotent) :
+de Wazuh tourne en tâche de fond sur la VM et résiste à une coupure SSH. Si l'installation du
+serveur échoue en cours de route (réseau, VM mise en veille…), repars d'une VM propre :
 
 ```bash
-vagrant provision wazuh
+vagrant destroy -f wazuh && vagrant up wazuh
 ```
+
+> Sur un portable, empêche la mise en veille pendant `vagrant up` : VirtualBox met sinon les
+> VMs en pause (« host power management ») et l'installation échoue. Sur macOS : `caffeinate -dimsu`.
 
 ## Accéder au dashboard
 

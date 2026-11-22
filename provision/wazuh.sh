@@ -91,6 +91,21 @@ if [ ! -s "/var/cache/apt/archives/$deb" ]; then
     "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-indexer/$deb"
 fi
 
+# Garde-disque : dès que le manager démarre pendant l'install, son module de détection de
+# vulnérabilités télécharge un feed CVE de ~10 Go qui sature le disque de 30 Go AVANT la fin
+# (le dashboard échoue alors sur « No space left on device »). On coupe VD dès que la conf
+# existe et on empêche le feed de s'accumuler tant que l'installeur tourne. harden() le
+# désactivera définitivement après. S'arrête quand l'installeur se termine.
+diskguard() {
+  while [ ! -f /var/ossec/etc/ossec.conf ] && pgrep -f 'bash wazuh-install.sh' >/dev/null; do sleep 1; done
+  sed -i '/<vulnerability-detection>/,/<\/vulnerability-detection>/ s|<enabled>yes</enabled>|<enabled>no</enabled>|' \
+    /var/ossec/etc/ossec.conf 2>/dev/null || true
+  while pgrep -f 'bash wazuh-install.sh' >/dev/null; do
+    find /var/ossec/queue/vd/feed -mindepth 1 -delete 2>/dev/null || true
+    sleep 2
+  done
+}
+
 # Install fraîche. Pas de -o (destructif). setsid : l'installeur tourne dans sa propre
 # session, donc une coupure SSH (SIGHUP) ne l'interrompt pas — il finit même si ce script meurt.
 cd /root
@@ -99,6 +114,7 @@ if ! pgrep -f 'bash wazuh-install.sh' >/dev/null; then
   : > "$LOG"
   setsid bash wazuh-install.sh -a -i > "$LOG" 2>&1 < /dev/null &
 fi
+diskguard &
 
 # Attendre le VRAI message de fin de l'installeur (le .tar, lui, est créé bien avant la fin).
 echo "Installation de Wazuh en cours (10-20 min)…"
