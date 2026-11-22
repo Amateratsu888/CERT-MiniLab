@@ -12,7 +12,7 @@ ADMIN_PW="Passer123-"                      # mot de passe fixe du dashboard admi
 # lab-count '<requête lucene>' [minutes] + rappel du mot de passe admin. Idempotent.
 # Heredoc NON quoté : $ADMIN_PW est injecté (source unique), les \$ restent littéraux dans le script.
 finalize() {
-  install -m 755 /dev/stdin /usr/local/bin/lab-count <<SCRIPT
+  install -m 700 /dev/stdin /usr/local/bin/lab-count <<SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
 q=\${1:?requête lucene}; mins=\${2:-10}
@@ -37,8 +37,13 @@ wait_indexer() {
 # Fixer le mot de passe du dashboard admin à $ADMIN_PW (sinon l'installeur en génère un aléatoire).
 # Idempotent : relancer le remet simplement à la même valeur.
 set_admin_password() {
-  [ -f /root/wazuh-passwords-tool.sh ] \
-    || curl -sS -o /root/wazuh-passwords-tool.sh https://packages.wazuh.com/4.14/wazuh-passwords-tool.sh
+  if [ ! -f /root/wazuh-passwords-tool.sh ]; then
+    # -f : échoue sur une erreur HTTP (pas de page d'erreur enregistrée puis exécutée) ;
+    # HTTPS/TLS imposés. Même source officielle que wazuh-install.sh. Blip réseau -> on n'abort pas.
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 \
+      -o /root/wazuh-passwords-tool.sh \
+      https://packages.wazuh.com/4.14/wazuh-passwords-tool.sh || return 0
+  fi
   bash /root/wazuh-passwords-tool.sh -u admin -p "$ADMIN_PW" >/dev/null 2>&1 || true
 }
 
