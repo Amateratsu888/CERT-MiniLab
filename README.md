@@ -45,17 +45,24 @@ La box `bento/ubuntu-24.04` existe en **amd64** (PC Windows/Linux x86) et en **a
 
 ### Alternative : VMware
 
-Le `Vagrantfile` supporte aussi **VMware** (Workstation sur Windows/Linux, Fusion sur Mac). Il faut
-le plugin [`vagrant-vmware-desktop`](https://developer.hashicorp.com/vagrant/docs/providers/vmware)
-(payant) puis :
+Le `Vagrantfile` supporte aussi **VMware** (Workstation sur Windows/Linux, Fusion sur Mac).
+Le plugin [`vagrant-vmware-desktop`](https://developer.hashicorp.com/vagrant/docs/providers/vmware)
+est **open source et gratuit** (licence MPL). Mise en place, en une fois :
+
+1. Installer le **Vagrant VMware Utility** (paquet système à télécharger :
+   https://developer.hashicorp.com/vagrant/downloads/vmware).
+2. Installer le plugin : `vagrant plugin install vagrant-vmware-desktop`
+3. Avoir VMware Fusion / Workstation (gratuit pour un usage perso).
+
+Puis :
 
 ```bash
 vagrant up --provider vmware_desktop
 ```
 
-> Non testé par l'auteur (pas de licence VMware) — à valider côté équipe. Les deux réseaux isolés
-> (`wan` 203.0.113.0/24, `lan` 192.168.10.0/24) sont séparés par sous-réseau sous VMware ; la clé
-> `virtualbox__intnet` du `Vagrantfile` est simplement ignorée par le provider VMware.
+> Non testé par l'auteur (pas de VMware sous la main) — à valider côté équipe. Les deux réseaux
+> isolés (`wan` 203.0.113.0/24, `lan` 192.168.10.0/24) sont séparés par sous-réseau sous VMware ;
+> la clé `virtualbox__intnet` du `Vagrantfile` est simplement ignorée par le provider VMware.
 
 ## Démarrage
 
