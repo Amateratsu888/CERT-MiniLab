@@ -43,6 +43,20 @@ La box `bento/ubuntu-24.04` existe en **amd64** (PC Windows/Linux x86) et en **a
 - **macOS Apple Silicon** : VirtualBox 7.1+ (support ARM). Le `Vagrantfile` contient un petit
   contournement, actif uniquement sur macOS, pour un bug de détection de ports de Vagrant.
 
+### Alternative : VMware
+
+Le `Vagrantfile` supporte aussi **VMware** (Workstation sur Windows/Linux, Fusion sur Mac). Il faut
+le plugin [`vagrant-vmware-desktop`](https://developer.hashicorp.com/vagrant/docs/providers/vmware)
+(payant) puis :
+
+```bash
+vagrant up --provider vmware_desktop
+```
+
+> Non testé par l'auteur (pas de licence VMware) — à valider côté équipe. Les deux réseaux isolés
+> (`wan` 203.0.113.0/24, `lan` 192.168.10.0/24) sont séparés par sous-réseau sous VMware ; la clé
+> `virtualbox__intnet` du `Vagrantfile` est simplement ignorée par le provider VMware.
+
 ## Démarrage
 
 ```bash
@@ -83,9 +97,14 @@ vagrant ssh attacker
 | 1 | Scan de ports | `sudo nmap -sS -sV -sC -p 22,80,443,1433,3306,3389 203.0.113.1` | `data.src_ip:203.0.113.66` |
 | 2 | Brute force SSH | `hydra -l admin -P ~/wordlist.txt -t 4 ssh://203.0.113.1` | `agent.name:pc1 and rule.groups:authentication_failures` |
 | 3 | Scan web | `nikto -h http://203.0.113.1 -maxtime 60s` | `agent.name:pc1 and rule.groups:web` |
+| 4 | Post-exploitation | `ssh admin@203.0.113.1` puis `sudo useradd -m backdoor` + dépôt d'un webshell | `agent.name:pc1 and (rule.id:5902 or rule.id:5403 or rule.id:554)` |
+| 5 | Dépôt de malware (EICAR) | déposer le fichier de test EICAR dans `/var/www/html` | `agent.name:pc1 and rule.id:554 and syscheck.path:*eicar*` |
 
 Le brute force (#2) **réussit** : le compte `admin` / `admin123` de pc1 est une **faille
 volontaire** pour la démo. Après plusieurs échecs tu verras une alerte de connexion réussie.
+Les scénarios 4 et 5 enchaînent dessus : `admin` peut passer **root sans mot de passe** (autre
+misconfig volontaire), et Wazuh détecte l'escalade, le nouveau compte et les fichiers déposés
+grâce à la **surveillance d'intégrité (FIM) en temps réel** sur pc1.
 
 > 📸 **Démonstration pas à pas avec captures d'écran du dashboard :**
 > [`docs/scenario-demo-attaque.md`](docs/scenario-demo-attaque.md) — runbook reproductible

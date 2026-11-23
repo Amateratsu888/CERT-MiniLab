@@ -12,6 +12,11 @@ echo 'uid=0(root) gid=0(root) groups=0(root)' > /var/www/html/uid
 
 id admin >/dev/null 2>&1 || useradd -m -s /bin/bash admin
 echo 'admin:admin123' | chpasswd
+# Misconfig VOLONTAIRE : admin peut devenir root sans mot de passe. Permet à l'attaquant,
+# une fois le brute force réussi, de faire de la post-exploitation (création d'utilisateur,
+# dépôt de webshell dans le web root…). Ne jamais faire ça en production.
+echo 'admin ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-admin-lab
+chmod 440 /etc/sudoers.d/90-admin-lab
 # 00- : sshd garde la première valeur lue, donc ce fichier l'emporte sur 50-cloud-init.conf.
 echo 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/00-lab.conf
 systemctl reload ssh
