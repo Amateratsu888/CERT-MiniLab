@@ -28,15 +28,20 @@ table inet lab {
     type filter hook forward priority 0; policy drop;
     ct state established,related accept
     iifname "$LAN" accept
-    iifname "$WAN" ip daddr 192.168.10.11 tcp dport { 22, 80 } ct status dnat accept
+    iifname "$WAN" ip daddr 192.168.10.11 tcp dport 22 ct status dnat accept
+    iifname "$WAN" ip daddr 192.168.10.12 tcp dport 80 ct status dnat accept
+    iifname "$WAN" ip daddr 192.168.10.13 tcp dport 22 ct status dnat accept
     log prefix "FW-DROP " drop
   }
 }
 
 table ip labnat {
   chain prerouting {
+    # Chaque service exposé est routé vers un poste différent -> on répartit les attaques.
     type nat hook prerouting priority -100;
-    iifname "$WAN" ip daddr 203.0.113.1 tcp dport { 22, 80 } dnat to 192.168.10.11
+    iifname "$WAN" ip daddr 203.0.113.1 tcp dport 22   dnat to 192.168.10.11       # SSH  -> pc1 (brute force + post-ex)
+    iifname "$WAN" ip daddr 203.0.113.1 tcp dport 80   dnat to 192.168.10.12       # web  -> pc2 (scan web)
+    iifname "$WAN" ip daddr 203.0.113.1 tcp dport 2222 dnat to 192.168.10.13:22    # SSH  -> pc3 (malware)
   }
   chain postrouting {
     type nat hook postrouting priority 100;

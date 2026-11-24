@@ -4,7 +4,7 @@ Runbook reproductible : on lance trois attaques depuis la machine attaquante ext
 les visualise en temps réel dans le dashboard Wazuh. Captures d'écran prises sur ce lab.
 
 ```
-[attacker] ──(Internet simulé)──► [router + Suricata] ──(LAN)──► pc1, pc2, wazuh
+[attacker] ──(Internet simulé)──► [router + Suricata] ──(LAN)──► pc1, pc2, pc3, wazuh
 203.0.113.66                       203.0.113.1                    agents Wazuh
 ```
 
@@ -16,7 +16,7 @@ Le lab est démarré et les 4 agents sont actifs :
 
 ```bash
 vagrant up                       # si ce n'est pas déjà fait
-vagrant ssh wazuh -c "sudo /var/ossec/bin/agent_control -l"   # doit lister router, pc1, pc2 en Active
+vagrant ssh wazuh -c "sudo /var/ossec/bin/agent_control -l"   # doit lister router, pc1, pc2, pc3 en Active
 ```
 
 Ouvre le dashboard sur **https://localhost:8443** (accepte le certificat autosigné — sous
@@ -102,12 +102,14 @@ empile les tentatives échouées successives.
 > Pour prouver que l'intrusion a **abouti**, filtre sur `agent.name:pc1 and rule.id:40112`
 > (« connexion réussie après une série d'échecs » — le cœur d'un scénario de compromission).
 
-### 2.4 Scénario « scan web (nikto) »
+### 2.4 Scénario « scan web (nikto) » → pc2
+
+Le port 80 est routé vers **pc2** ; `nikto -h http://203.0.113.1` scanne donc le serveur web de pc2.
 
 Filtre :
 
 ```
-agent.name:pc1 and rule.groups:web
+agent.name:pc2 and rule.groups:web
 ```
 
 ![Alertes du scan web](images/07-webscan-events.png)
@@ -132,7 +134,7 @@ echo '<?php system($_GET[c]); ?>' | sudo tee /var/www/html/shell.php   # webshel
 Filtre :
 
 ```
-agent.name:pc1 and (rule.id:5902 or rule.id:5403 or rule.id:554)
+agent.name:pc1 and (rule.id:5902 or rule.id:5402 or rule.id:5403 or rule.id:554)
 ```
 
 ![Chaîne de post-exploitation](images/08-postex-events.png)
@@ -141,11 +143,14 @@ On voit toute la **kill chain** sur pc1 : **escalade de privilèges** (*First ti
 sudo*, règle 5403), **persistance** (*New user added to the system*, règle 5902, niveau 8), et
 **dépôt de fichier** dans le web root (*File added to the system*, règle 554 via le FIM temps réel).
 
-### 2.6 Scénario « dépôt de malware (EICAR) »
+### 2.6 Scénario « dépôt de malware (EICAR) » → pc3
 
-Toujours sur pc1, l'attaquant dépose le fichier de test antivirus standard **EICAR** :
+Cette fois l'attaquant vise **pc3** (exposé en SSH sur le port **2222**) et y dépose le fichier
+de test antivirus standard **EICAR** :
 
 ```bash
+sshpass -p admin123 ssh -p 2222 admin@203.0.113.1
+# puis, sur pc3 :
 printf 'X5O!P%%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' \
   | sudo tee /var/www/html/eicar.com
 ```
@@ -153,7 +158,7 @@ printf 'X5O!P%%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' 
 Filtre :
 
 ```
-agent.name:pc1 and rule.id:554 and syscheck.path:*eicar*
+agent.name:pc3 and rule.id:554 and syscheck.path:*eicar*
 ```
 
 Déplie l'alerte (🔍) :
@@ -174,9 +179,9 @@ Le **FIM en temps réel** (`decoder: syscheck_new_entry`) a capté la création 
 | Scan réseau (Suricata) | `data.src_ip:203.0.113.66 and rule.groups:suricata` |
 | Brute force SSH | `agent.name:pc1 and rule.groups:authentication_failures` |
 | Intrusion réussie après brute force | `agent.name:pc1 and rule.id:40112` |
-| Scan web | `agent.name:pc1 and rule.groups:web` |
-| Post-exploitation (escalade + persistance) | `agent.name:pc1 and (rule.id:5902 or rule.id:5403 or rule.id:554)` |
-| Dépôt de malware EICAR (FIM) | `agent.name:pc1 and rule.id:554 and syscheck.path:*eicar*` |
+| Scan web | `agent.name:pc2 and rule.groups:web` |
+| Post-exploitation (escalade + persistance) | `agent.name:pc1 and (rule.id:5902 or rule.id:5402 or rule.id:5403 or rule.id:554)` |
+| Dépôt de malware EICAR (FIM) | `agent.name:pc3 and rule.id:554 and syscheck.path:*eicar*` |
 
 ---
 

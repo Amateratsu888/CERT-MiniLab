@@ -11,22 +11,31 @@ apparaître en temps réel.
                         carte NAT Vagrant (vrai Internet, pour apt)
                                   │
 [attacker] ─(wan)─ [router + Suricata] ─(lan = le switch)─┬─ wazuh   192.168.10.10
-203.0.113.66       WAN 203.0.113.1                        ├─ pc1     192.168.10.11  (SSH + web exposés)
-                   LAN 192.168.10.1                        └─ pc2     192.168.10.12
+203.0.113.66       WAN 203.0.113.1                        ├─ pc1     192.168.10.11
+                   LAN 192.168.10.1                        ├─ pc2     192.168.10.12
+                                                           └─ pc3     192.168.10.13
 ```
 
 Le « switch » est un réseau interne VirtualBox (`lan`). Le réseau `wan` est un Internet simulé.
 Tout le trafic des postes vers Internet passe par le routeur, donc Suricata le voit.
 
+Les 3 postes sont identiques, mais le routeur dirige un service différent vers chacun, ce qui
+**répartit les attaques** (une par poste, visible séparément dans Wazuh) :
+
+| Port exposé (sur 203.0.113.1) | Poste ciblé | Attaque |
+|---|---|---|
+| `22` (SSH) | **pc1** | brute force SSH + post-exploitation |
+| `80` (web) | **pc2** | scan web (nikto) |
+| `2222` (SSH) | **pc3** | dépôt de malware (EICAR) |
+
 | VM | Rôle | RAM |
 |----|------|-----|
 | router | Routeur/pare-feu nftables + NAT + Suricata + agent Wazuh | 1 Go |
 | wazuh | Wazuh all-in-one (indexer + manager + dashboard) | 6 Go |
-| pc1 | Poste avec SSH et site web exposés, agent Wazuh | 1 Go |
-| pc2 | Poste, agent Wazuh | 1 Go |
+| pc1 / pc2 / pc3 | Postes vulnérables (nginx + SSH faible + FIM), agent Wazuh | 1 Go ×3 |
 | attacker | Attaquant externe (nmap, hydra, nikto) | 1 Go |
 
-Total ≈ 10 Go de RAM. Prévois une machine avec au moins 16 Go.
+Total ≈ 11 Go de RAM. Prévois une machine avec au moins 16 Go.
 
 ## Prérequis (Windows, Linux ou macOS)
 
@@ -99,19 +108,21 @@ Pour le changer, modifie `ADMIN_PW` dans `provision/wazuh.sh` puis `vagrant prov
 vagrant ssh attacker
 ```
 
-| # | Attaque | Commande | Où regarder dans le dashboard (Threat Hunting → filtre) |
-|---|---------|----------|---------------------------------------------------------|
-| 1 | Scan de ports | `sudo nmap -sS -sV -sC -p 22,80,443,1433,3306,3389 203.0.113.1` | `data.src_ip:203.0.113.66` |
-| 2 | Brute force SSH | `hydra -l admin -P ~/wordlist.txt -t 4 ssh://203.0.113.1` | `agent.name:pc1 and rule.groups:authentication_failures` |
-| 3 | Scan web | `nikto -h http://203.0.113.1 -maxtime 60s` | `agent.name:pc1 and rule.groups:web` |
-| 4 | Post-exploitation | `ssh admin@203.0.113.1` puis `sudo useradd -m backdoor` + dépôt d'un webshell | `agent.name:pc1 and (rule.id:5902 or rule.id:5403 or rule.id:554)` |
-| 5 | Dépôt de malware (EICAR) | déposer le fichier de test EICAR dans `/var/www/html` | `agent.name:pc1 and rule.id:554 and syscheck.path:*eicar*` |
+Chaque attaque vise un poste différent (via le port exposé), donc on la retrouve sur l'agent
+correspondant dans Wazuh.
 
-Le brute force (#2) **réussit** : le compte `admin` / `admin123` de pc1 est une **faille
-volontaire** pour la démo. Après plusieurs échecs tu verras une alerte de connexion réussie.
-Les scénarios 4 et 5 enchaînent dessus : `admin` peut passer **root sans mot de passe** (autre
-misconfig volontaire), et Wazuh détecte l'escalade, le nouveau compte et les fichiers déposés
-grâce à la **surveillance d'intégrité (FIM) en temps réel** sur pc1.
+| # | Cible | Attaque | Commande | Filtre dashboard (`agent.name:`) |
+|---|---|---------|----------|----------------------------------|
+| 1 | router | Scan de ports | `sudo nmap -sS -sV -p 22,80,443,2222 203.0.113.1` | `data.src_ip:203.0.113.66` |
+| 2 | **pc1** | Brute force SSH | `hydra -l admin -P ~/wordlist.txt -t 4 ssh://203.0.113.1` | `agent.name:pc1 and rule.groups:authentication_failures` |
+| 3 | **pc2** | Scan web | `nikto -h http://203.0.113.1 -maxtime 60s` | `agent.name:pc2 and rule.groups:web` |
+| 4 | **pc1** | Post-exploitation | `ssh admin@203.0.113.1` → `sudo useradd -m backdoor` + webshell | `agent.name:pc1 and (rule.id:5902 or rule.id:5402 or rule.id:5403 or rule.id:554)` |
+| 5 | **pc3** | Dépôt de malware (EICAR) | `ssh -p 2222 admin@203.0.113.1` → déposer le fichier EICAR | `agent.name:pc3 and rule.id:554 and syscheck.path:*eicar*` |
+
+Le brute force (#2) **réussit** : le compte `admin` / `admin123` (présent sur chaque poste) est
+une **faille volontaire**. Les scénarios 4 et 5 enchaînent dessus : `admin` peut passer **root
+sans mot de passe** (autre misconfig volontaire), et Wazuh détecte l'escalade, le nouveau compte
+et les fichiers déposés grâce à la **surveillance d'intégrité (FIM) en temps réel** sur les postes.
 
 > 📸 **Démonstration pas à pas avec captures d'écran du dashboard :**
 > [`docs/scenario-demo-attaque.md`](docs/scenario-demo-attaque.md) — runbook reproductible

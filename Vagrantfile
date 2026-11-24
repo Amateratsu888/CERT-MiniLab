@@ -1,6 +1,6 @@
 # Lab réseau d'entreprise + Wazuh — voir docs/2026-11-21-lab-wazuh-design.md
 #
-#  [attacker] ── (wan 203.0.113.0/24) ── [router] ── (lan 192.168.10.0/24 = le switch) ── wazuh, pc1, pc2
+#  [attacker] ── (wan 203.0.113.0/24) ── [router] ── (lan 192.168.10.0/24 = le switch) ── wazuh, pc1, pc2, pc3
 #
 # Ordre de démarrage = ordre de définition : le routeur d'abord (Internet des autres VMs),
 # puis le manager Wazuh (avant ses agents).
@@ -61,20 +61,18 @@ Vagrant.configure("2") do |config|
     m.vm.provision "wazuh", type: "shell", path: "provision/wazuh.sh"
   end
 
-  { "pc1" => "192.168.10.11", "pc2" => "192.168.10.12" }.each do |name, ip|
+  # 3 postes identiques (hôtes vulnérables). Les attaques sont réparties par le routeur :
+  # SSH -> pc1 (brute force + post-ex), web -> pc2 (scan web), SSH:2222 -> pc3 (malware).
+  { "pc1" => "192.168.10.11", "pc2" => "192.168.10.12", "pc3" => "192.168.10.13" }.each do |name, ip|
     config.vm.define name do |m|
       m.vm.hostname = name
       m.vm.network "private_network", ip: ip, virtualbox__intnet: "lan"
       m.vm.provision "client", type: "shell", path: "provision/client.sh"
-      m.vm.provision "pc1", type: "shell", path: "provision/pc1.sh" if name == "pc1"
-      if name == "pc1"
-        m.vm.provision "agent", type: "shell", path: "provision/agent.sh",
-          args: ["/var/log/nginx/access.log:apache", "/var/log/nginx/error.log:apache"]
-        # FIM temps réel (web root + /root) : détecte webshell/malware déposés en post-exploitation.
-        m.vm.provision "fim", type: "shell", path: "provision/fim-pc1.sh"
-      else
-        m.vm.provision "agent", type: "shell", path: "provision/agent.sh"
-      end
+      m.vm.provision "weakhost", type: "shell", path: "provision/weakhost.sh"
+      m.vm.provision "agent", type: "shell", path: "provision/agent.sh",
+        args: ["/var/log/nginx/access.log:apache", "/var/log/nginx/error.log:apache"]
+      # FIM temps réel (web root + /root) : détecte webshell/malware déposés.
+      m.vm.provision "fim", type: "shell", path: "provision/fim.sh"
     end
   end
 
