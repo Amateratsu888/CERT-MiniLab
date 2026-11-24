@@ -124,9 +124,11 @@ une **faille volontaire**. Les scénarios 4 et 5 enchaînent dessus : `admin` pe
 sans mot de passe** (autre misconfig volontaire), et Wazuh détecte l'escalade, le nouveau compte
 et les fichiers déposés grâce à la **surveillance d'intégrité (FIM) en temps réel** sur les postes.
 
+> 📖 **Documentation des scénarios** (commande pour lancer + filtre pour retrouver dans Wazuh) :
+> [`docs/scenarios-attaques.md`](docs/scenarios-attaques.md).
+>
 > 📸 **Démonstration pas à pas avec captures d'écran du dashboard :**
-> [`docs/scenario-demo-attaque.md`](docs/scenario-demo-attaque.md) — runbook reproductible
-> (lancer les attaques + les retrouver dans Wazuh, filtre par filtre).
+> [`docs/scenario-demo-attaque.md`](docs/scenario-demo-attaque.md).
 
 Pour voir le **trafic normal** (pas seulement les alertes), filtre sur
 `agent.name:router and rule.groups:suricata` après avoir navigué depuis un poste
